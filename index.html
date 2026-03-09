@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2FA Generator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #0a0a0f; color: #e8e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        .container { max-width: 500px; width: 100%; background: #14141e; border-radius: 12px; padding: 30px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        h1 { color: #00d4ff; margin-bottom: 20px; text-align: center; }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; color: #a8a8b0; }
+        input { width: 100%; padding: 12px; background: #1a1a24; border: 1px solid #2a2a3a; border-radius: 6px; color: #e8e8f0; font-size: 16px; }
+        input:focus { outline: none; border-color: #00d4ff; }
+        button { width: 100%; padding: 12px; background: #00d4ff; border: none; border-radius: 6px; color: #0a0a0f; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #00b8e6; }
+        .code-display { background: #1a1a24; border: 2px solid #00d4ff; border-radius: 8px; padding: 20px; text-align: center; margin-top: 20px; display: none; }
+        .code { font-size: 36px; font-weight: bold; color: #00d4ff; letter-spacing: 4px; }
+        .timer { margin-top: 10px; color: #a8a8b0; }
+        .progress { width: 100%; height: 4px; background: #2a2a3a; border-radius: 2px; margin-top: 10px; overflow: hidden; }
+        .progress-bar { height: 100%; background: #00d4ff; transition: width 1s linear; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 2FA Generator</h1>
+        <div class="input-group">
+            <label for="secret">TOTP Secret Key</label>
+            <input type="text" id="secret" placeholder="Enter your secret key">
+        </div>
+        <button onclick="generateCode()">Generate Code</button>
+        <div class="code-display" id="codeDisplay">
+            <div class="code" id="code">------</div>
+            <div class="timer">Valid for <span id="timer">30</span>s</div>
+            <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+        </div>
+    </div>
+    <script>
+        function base32Decode(base32) {
+            const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+            let bits = '';
+            for (let i = 0; i < base32.length; i++) {
+                const val = alphabet.indexOf(base32.charAt(i).toUpperCase());
+                if (val === -1) continue;
+                bits += val.toString(2).padStart(5, '0');
+            }
+            const bytes = [];
+            for (let i = 0; i + 8 <= bits.length; i += 8) {
+                bytes.push(parseInt(bits.substr(i, 8), 2));
+            }
+            return new Uint8Array(bytes);
+        }
+        async function generateTOTP(secret) {
+            const key = base32Decode(secret);
+            const epoch = Math.floor(Date.now() / 1000);
+            const time = Math.floor(epoch / 30);
+            const timeBytes = new ArrayBuffer(8);
+            const timeView = new DataView(timeBytes);
+            timeView.setUint32(4, time, false);
+            const cryptoKey = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+            const signature = await crypto.subtle.sign('HMAC', cryptoKey, timeBytes);
+            const signatureArray = new Uint8Array(signature);
+            const offset = signatureArray[signatureArray.length - 1] & 0x0f;
+            const binary = ((signatureArray[offset] & 0x7f) << 24) | ((signatureArray[offset + 1] & 0xff) << 16) | ((signatureArray[offset + 2] & 0xff) << 8) | (signatureArray[offset + 3] & 0xff);
+            return (binary % 1000000).toString().padStart(6, '0');
+        }
+        let interval;
+        async function generateCode() {
+            const secret = document.getElementById('secret').value.trim();
+            if (!secret) { alert('Please enter a secret key'); return; }
+            document.getElementById('codeDisplay').style.display = 'block';
+            if (interval) clearInterval(interval);
+            async function update() {
+                const code = await generateTOTP(secret);
+                document.getElementById('code').textContent = code;
+                const epoch = Math.floor(Date.now() / 1000);
+                const remaining = 30 - (epoch % 30);
+                document.getElementById('timer').textContent = remaining;
+                document.getElementById('progressBar').style.width = (remaining / 30 * 100) + '%';
+            }
+            await update();
+            interval = setInterval(update, 1000);
+        }
+    </script>
+</body>
+</html>
